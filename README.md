@@ -1,7 +1,7 @@
 # Minervini Screener 📈
 
 基于 Mark Minervini 的 **SEPA 方法论** 每日扫描美股、发现符合 Stage 2 强势趋势的候选标的，并通过邮件推送筛选结果。
-
+https://mikeli008008.github.io/minervini-screener/
 ---
 
 ## 功能特性
