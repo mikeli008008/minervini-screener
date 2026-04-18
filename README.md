@@ -1,19 +1,131 @@
 # Minervini Screener 📈
 
-基于 Mark Minervini 的 **SEPA 方法论** 每日扫描美股、发现符合 Stage 2 强势趋势的候选标的，并通过邮件推送筛选结果。
-https://mikeli008008.github.io/minervini-screener/
+基于 Mark Minervini 的 **SEPA 方法论**（Specific Entry Point Analysis）每日自动扫描美股，识别同时满足 **技术面突破形态** + **基本面 Leader Profile** 的顶级候选股票，通过邮件推送筛选结果。
+
+> "We want to find stocks that are early in stage 2, with fundamentals that explain why the stock is going up."
+> — *Mark Minervini, Trade Like a Stock Market Wizard*
+
 ---
 
-## 功能特性
+## 核心功能
 
-- **Minervini 8条趋势模板**：全部量化实现，自动判断是否符合 Stage 2 上升趋势
-- **相对强度 RS Rating**：基于全部扫描股票的百分位排名（0-99）
-- **真·VCP 检测**：基于峰谷识别算法，识别 2-4 次连续收缩的 Minervini 级 VCP 形态，输出精确 pivot price（买入触发点）
-- **综合评分**（0-160分）：趋势模板 + RS + 真VCP + 接近pivot + perfect setup 加权
-- **Perfect Setup 识别**：真VCP + 8/8通过 + 接近pivot 三重共振的最高优先级信号
-- **HTML 邮件**：Perfect Setup 专区 + Top 20 + 突破候选 + VCP 列表 + 板块分布
-- **完整交互式报告**：支持按 Perfect/True VCP/8-pass/Near Pivot/RS90 筛选，可展开查看完整 VCP 拆解
-- **每日自动运行**：通过 GitHub Actions 免费定时
+### 四层筛选引擎
+
+本系统实现了 Minervini 方法论的完整量化版本，每只股票经过四道独立的筛选层：
+
+#### 第一层：技术趋势（8条模板）
+Minervini 的 Stage 2 Trend Template 全部量化实现：
+
+1. 价格 > MA150 & MA200
+2. MA150 > MA200
+3. MA200 向上（20日前 MA200 < 今日 MA200）
+4. MA50 > MA150 & MA200
+5. 价格 > MA50
+6. 价格 ≥ 52周低点的130%
+7. 价格距 52周高点 ≤ 25%
+8. RS Rating ≥ 70
+
+#### 第二层：VCP 形态（Volatility Contraction Pattern）
+- 基于峰谷识别的算法自动检测连续收缩
+- 验证收缩次数 ≥ 2、深度递减、最后一次 < 15%、成交量萎缩
+- 输出精确的 **pivot price**（Minervini 定义的买入触发价）
+- VCP 评分 0-100
+
+#### 第三层：相对强度（RS Rating）
+- IBD 式百分位排名（0-99）
+- 基于股票 1 年涨幅相对扫描全集的分布位置
+
+#### 第四层：基本面 Leader Profile
+抓取每只股票的季度财务数据，评估 Minervini "Leader Profile" 五项硬性标准：
+
+1. **EPS 同比增长 ≥ 25%**
+2. **EPS 加速**（本季同比 > 上季同比）
+3. **营收同比正增长**
+4. **ROE ≥ 17%**
+5. **净利润率扩张或 ≥ 15%**
+
+基本面评分 0-50 + 字母等级 A/B/C/D/F
+
+### 信号分层
+
+| 信号 | 触发条件 | 含义 |
+|---|---|---|
+| **★★ Super Stock** | 真VCP + 8/8 + near pivot + Leader Profile | Minervini 大牛股四重共振 |
+| **★ Perfect Setup** | 真VCP + 8/8 + near pivot | 技术面完美但基本面未必达标 |
+| **🏆 Leader Profile** | 基本面 5 条达标 ≥ 4 | 基本面领头羊，等待技术确认 |
+| **👁 Watchlist** | 历史曾出现过 Super 或 Perfect | 长期跟踪池 |
+
+### 综合评分（0-220分）
+
+```
+技术面 (0-160):
+  - 8条趋势模板 × 10 = 80分
+  - RS评分 × 0.3 = 30分
+  - 真VCP × 25 = 25分
+  - ATR/Volume/近高/近pivot/全通过/perfect 加分 = 最高25分
+
+基本面 (0-50):
+  - 基本面评分 × 1.0
+
+加成 (0-15):
+  - Leader Profile +10
+  - Super Stock +5 (四重共振奖励)
+```
+
+### 自动 Watchlist 沉淀
+
+- 每次扫描自动把 Super Stock 和 Perfect Setup 加入 `watchlist.txt`
+- 保留首次发现日期、历史最高信号、历史最高评分
+- 支持**手动编辑**（加备注、删除）— 手动修改的 note 永远不会被覆盖
+- 邮件每天显示 watchlist 所有股票的当前状态：
+  - ● 维持（信号级别与历史峰值一致）
+  - ↓ 降级（从 Super 降到 Perfect/Leader/Watching）
+  - ↑ 升级（稀有，一般只在刚加入时发生）
+
+### 每日推送
+
+**邮件内容**（HTML 富文本）：
+- 6列 Stats 仪表板：Universe / Super / Perfect / Leader / 8-Pass / Grade A+B
+- 👁 Watchlist 专区（紫色，个人关注池状态追踪）
+- ★★ Super Stock 专区（绿色高亮，最高优先级）
+- ★ Perfect Setup 专区（黄色，技术面完美）
+- 🏆 Leader Profile 专区（深绿，基本面领头羊）
+- Top 20 by Minervini Score（含 Grade 列和所有 tag）
+- True VCP + Breakout Watch 双列
+- 板块分布统计
+
+**交互式 HTML 报告**（GitHub Pages 托管）：
+- 8列 Stats 栏
+- 10 个 Filter 按钮（All / Super / Perfect / Leader / Watchlist / True VCP / 8-Pass / Grade A+B / Near Pivot / RS≥90）
+- 按任意列排序
+- 点击任意股票展开 **4 列详情页**：
+  - Trend Template（8条勾叉 + MA数据）
+  - VCP Analysis（收缩序列 + pivot 距离 + 成交量比）
+  - **Fundamentals**（Grade大字 + EPS/Rev/ROE + Leader Check 5项勾叉）
+  - Price Action（6个月图表 + ATR + RS）
+
+---
+
+## 架构
+
+```
+tickers.txt       → 627 只股票池（S&P 500 + 精选成长股 + 国际ADR）
+    ↓
+scanner.py        → 四层扫描引擎（技术 + VCP + RS + 基本面）
+    ↓
+fundamentals.py   → 基本面抓取和评分模块
+vcp.py            → VCP 峰谷识别算法
+watchlist.py      → Watchlist 自动沉淀和状态追踪
+    ↓
+reports/latest.json → 结构化扫描结果
+    ↓
+┌───────────────────┬──────────────────────┐
+│ send_email.py     │ generate_report.py   │
+│ HTML邮件推送      │ 交互式网页报告       │
+└───────────────────┴──────────────────────┘
+    ↓                       ↓
+Gmail SMTP         docs/index.html → GitHub Pages
+```
 
 ---
 
@@ -28,204 +140,122 @@ https://mikeli008008.github.io/minervini-screener/
 
 推荐用 **Gmail 应用专用密码**（最简单，免费）：
 
-1. 打开 [Google 账户 → 安全性](https://myaccount.google.com/security)
-2. 开启 **两步验证**（如果还没开）
-3. 进入 [应用专用密码页面](https://myaccount.google.com/apppasswords)
-4. 生成一个新密码（应用名随意填 `Minervini Screener`）
-5. 复制生成的 16 位密码（格式如 `abcd efgh ijkl mnop`，**去掉空格**使用）
+1. 登录 Gmail → 账户设置 → 安全性 → **2 步验证**（先启用）
+2. 安全性 → **应用专用密码** → 新建 → 名称随便填
+3. Google 会生成一个 16 位密码（例如 `abcd efgh ijkl mnop`）— **记下来**
 
-> 不想用 Gmail？支持任何 SMTP：Outlook（smtp.office365.com:587）、QQ 邮箱（smtp.qq.com:587）、自建等。
+### 第 3 步：在 GitHub 设置 Secrets
 
-### 第 3 步：在 GitHub 配置 Secrets
+Repo → Settings → **Secrets and variables** → **Actions** → **New repository secret**
 
-进入你的 repo → `Settings` → `Secrets and variables` → `Actions` → `New repository secret`
+设置以下 secrets：
 
-按顺序添加以下 secrets：
-
-| Secret 名称 | 说明 | 示例 |
-|---|---|---|
-| `SMTP_USER` | 发件邮箱 | `you@gmail.com` |
-| `SMTP_PASS` | 应用专用密码（16位） | `abcdefghijklmnop` |
-| `EMAIL_TO` | 收件邮箱（多个用逗号分隔） | `you@gmail.com,backup@gmail.com` |
-| `SMTP_HOST` | SMTP 服务器（Gmail 可不填） | `smtp.gmail.com` |
-| `SMTP_PORT` | SMTP 端口（默认 587，可不填） | `587` |
-| `EMAIL_FROM` | 发件人显示（可不填，默认同 SMTP_USER） | `Minervini Bot <you@gmail.com>` |
-| `REPORT_URL` | 完整报告链接（可选，开启 Pages 后填） | `https://USER.github.io/minervini-screener/` |
-
-**最少必填的是前 3 个**：`SMTP_USER`、`SMTP_PASS`、`EMAIL_TO`。
-
-### 第 4 步：开启 GitHub Actions
-
-1. 进入 repo → `Actions` 标签页
-2. 如果提示启用 workflows，点击启用
-3. 点击左侧 `Daily Minervini Scan` → 右上角 `Run workflow` → 选 `main` 分支 → `Run workflow`
-4. 等待约 5-10 分钟完成扫描
-5. 如果配置正确，你会收到第一封邮件 📬
-
-### 第 5 步（可选）：开启 GitHub Pages 查看完整报告
-
-1. 进入 repo → `Settings` → `Pages`
-2. Source 选 `Deploy from a branch`
-3. Branch 选 `main`，目录选 `/docs`
-4. 保存后等待 1-2 分钟，就能通过 `https://你的用户名.github.io/minervini-screener/` 访问完整的交互式报告
-5. 把这个 URL 填回 Secret `REPORT_URL`，之后邮件里会带有跳转链接
-
----
-
-## 自动运行时间
-
-默认配置为 **美东盘后** 跑两次（避开夏令时/冬令时切换）：
-
-- UTC 21:30（美东冬令时 16:30 / 夏令时 17:30）
-- UTC 22:30（美东冬令时 17:30 / 夏令时 18:30）
-
-**注意**：GitHub Actions 的定时触发会被延迟几分钟到几十分钟（免费版共享资源，不保证准时）。如果要求高准时可以改用 AWS EventBridge 或服务器 cron。
-
-修改运行时间：编辑 `.github/workflows/daily_scan.yml` 里的 `cron` 字段。[Cron 语法参考](https://crontab.guru/)
-
----
-
-## 自定义股票池
-
-编辑 `tickers.txt` 文件：
-- 每行一个美股 ticker
-- `#` 开头是注释
-- 默认约 350-400 只，覆盖主流成长股 + S&P 500 主要成分 + 热门中小盘
-
-想扫全市场？去下载最新的 S&P 500、Nasdaq 100、Russell 2000 成分列表塞进去即可。扫描耗时大约每 100 只股票 30 秒左右（10 线程并发），跑 2000 只大约 8-10 分钟。
-
----
-
-## 本地测试
-
-如果想在本地先试跑：
-
-```bash
-# 安装依赖
-pip install -r requirements.txt
-
-# 运行扫描（约 5 分钟）
-python scanner.py
-
-# 生成 HTML 报告
-python generate_report.py
-
-# 预览邮件（不发送，只生成 reports/email_preview.html）
-python send_email.py
-
-# 真实发送邮件（需先设置环境变量）
-export SMTP_USER="you@gmail.com"
-export SMTP_PASS="应用专用密码"
-export EMAIL_TO="you@gmail.com"
-python send_email.py
-```
-
----
-
-## 文件结构
-
-```
-minervini-screener/
-├── scanner.py              # 核心扫描引擎
-├── vcp.py                  # VCP峰谷识别算法
-├── send_email.py           # 邮件生成与发送
-├── generate_report.py      # 完整 HTML 报告生成
-├── tickers.txt             # 股票池（默认 570 只：S&P 500 + 精选成长股）
-├── requirements.txt        # Python 依赖
-├── .github/workflows/
-│   └── daily_scan.yml     # GitHub Actions 配置
-├── reports/               # 每日扫描数据（自动生成）
-│   ├── latest.json
-│   ├── data_YYYY-MM-DD.json
-│   └── email_preview.html
-└── docs/                  # 完整 HTML 报告（GitHub Pages）
-    ├── index.html         # 最新报告
-    └── report_YYYY-MM-DD.html
-```
-
----
-
-## Minervini 8 条趋势模板
-
-只有同时满足以下全部条件的股票才被判定为 "Stage 2 qualifier"：
-
-1. 当前股价 **>** MA150 和 MA200
-2. MA150 **>** MA200
-3. MA200 正在向上（至少近一个月）
-4. MA50 **>** MA150 和 MA200
-5. 当前股价 **>** MA50
-6. 股价 **≥** 52 周低点的 **130%**
-7. 股价 **≥** 52 周高点的 **75%**（即距离高点 ≤ 25%）
-8. RS Rating **≥** 70（相对强度百分位排名）
-
----
-
-## 综合评分逻辑（0-160）
-
-| 项目 | 分值 |
+| Name | Value |
 |---|---|
-| 通过的趋势模板条数 | ×10 = 最高 80 分 |
-| RS Rating 加权 | ×0.3 = 最高 30 分 |
-| 真 VCP 评分 | ×0.25 = 最高 25 分 ★主要setup加分 |
-| ATR 收缩（辅助指标） | +3 分 |
-| 成交量萎缩 | +3 分 |
-| 距 52 周高点 ≤15% | +5 分 |
-| 接近 VCP pivot ≤5% | +4 分 |
-| 8 条全部通过奖励 | +5 分 |
-| Perfect Setup 奖励（真VCP + 8/8 + near pivot） | +5 分 |
+| `SMTP_HOST` | `smtp.gmail.com` |
+| `SMTP_PORT` | `587` |
+| `SMTP_USER` | `你的邮箱@gmail.com` |
+| `SMTP_PASS` | `你刚刚生成的16位应用密码`（去掉空格） |
+| `EMAIL_TO` | `收件邮箱@xxx.com`（可以和 SMTP_USER 相同，也可多个用逗号分隔） |
 
-**阅读评分的经验法则**：
-- **130+ 分**：高概率 Perfect Setup，最优先关注
-- **110-130 分**：强势股，多数符合 Stage 2 + 有形态支撑
-- **90-110 分**：合格趋势，但可能缺乏即时 entry signal
-- **< 90 分**：有瑕疵，不建议追涨
+**可选**（启用 GitHub Pages 后）：
 
-## 真·VCP 识别标准
+| Name | Value |
+|---|---|
+| `REPORT_URL` | `https://你的用户名.github.io/minervini-screener/` |
 
-VCP (Volatility Contraction Pattern) 必须同时满足：
+### 第 4 步：启用 GitHub Actions 写入权限
 
-1. **至少 2 次连续回调**（越多越好，3-4 次最理想）
-2. **回调深度递减**（tightening）——每次回调比上次浅
-3. **最后一次回调 < 15%**（紧凑整理，为突破蓄力）
-4. **整理期成交量萎缩**（后半段平均成交量 < 前半段的 85%）
-5. **当前价接近 pivot point**（最后一次回调的起点）
+Repo → Settings → **Actions** → **General** → 滚到底部
 
-VCP 得分 ≥ 50 且满足前述底线条件，判定为 **真 VCP**。
+**Workflow permissions** 选择 **Read and write permissions** → Save
 
-**Perfect Setup** = 真 VCP + 8/8 趋势模板 + 接近 pivot 三重共振，是最高优先级信号。
+### 第 5 步：启用 GitHub Pages（可选但推荐）
+
+Repo → Settings → **Pages**
+
+- Source: **Deploy from a branch**
+- Branch: **main**, Folder: **/docs**
+- Save
+
+几分钟后你会得到：`https://你的用户名.github.io/minervini-screener/`
+
+### 第 6 步：手动触发第一次扫描
+
+Actions → Daily Minervini Scan → **Run workflow**
+
+等 20-30 分钟，第一封邮件会到你的收件箱。
 
 ---
 
-## 常见问题
+## 日常使用
 
-**Q: 邮件收不到？**
-- 检查垃圾邮件
-- 去 Actions 标签页看 workflow 是否成功运行
-- 点进 failed 的 workflow 看具体错误（通常是 SMTP 密码错误或邮箱配置问题）
+### 自动运行
 
-**Q: 怎么调整扫描时间？**
-- 编辑 `.github/workflows/daily_scan.yml` 里的 `cron`
-- 用 [crontab.guru](https://crontab.guru/) 帮你生成正确的表达式
-- 注意 GitHub Actions 使用 **UTC 时间**
+GitHub Actions 设置为每周一到周五 **美东盘后自动运行**（UTC 21:30 和 22:30 各一次，提供冗余）。
 
-**Q: 想扫 A 股？**
-- yfinance 支持部分 A 股（后缀 `.SS` / `.SZ`），但数据质量一般
-- 推荐换用 `akshare` 库重写 scanner 的数据抓取部分
-- 筛选逻辑完全通用，只需换数据源
+### 编辑股票池
 
-**Q: GitHub Actions 会花钱吗？**
-- 公开 repo：完全免费
-- 私有 repo：每月 2000 分钟免费额度，每次扫描约 8-12 分钟（570只股票），一个月消耗约 250-400 分钟，**绰绰有余**
+`tickers.txt` — 直接在 GitHub 网页编辑添加/删除股票：
+- 每行一只股票代码
+- `#` 开头为注释
+- 大小写不敏感，自动去重
 
-**Q: 为什么有些股票拉不到数据？**
-- Yahoo Finance 偶尔会 rate limit（特别是跑到 500+ 只股票的后面）
-- 这通常是暂时的，下次扫描会正常
-- 如果发现特定股票长期拉不到，可以在 tickers.txt 中删除它
+### 编辑 Watchlist
+
+`watchlist.txt` — 第一次扫描后自动生成，你可以手动编辑：
+
+```
+TICKER | FIRST_SEEN | PEAK_SIGNAL | PEAK_SCORE | NOTE
+TSLA | 2026-04-18 | Perfect | 102.8 | 叙事驱动:Robotaxi 等待基本面兑现
+NVDA | 2026-04-18 | Super | 144.0 | AI leader 已兑现
+```
+
+- 加备注：在 NOTE 列写任何中英文（会显示在邮件里）
+- 删除股票：直接删除那一行
+- 手动添加股票：直接加一行（填什么信号都可以，扫描时会更新）
+
+---
+
+## 如何使用筛选结果交易
+
+> **免责声明：本工具仅为研究辅助，不构成投资建议。所有交易决策和后果由使用者自行承担。**
+
+### Minervini 的核心规则
+
+1. **单笔风险 ≤ 总账户 1%**：入场前必须算好止损位，用仓位倒推股数
+2. **硬止损执行**：触发就走，不讨价还价
+3. **止损位**：pivot 下方 **7-8%**（新手用 5%）
+4. **同时持仓 ≤ 5 只**：不过度分散
+5. **熊市清仓**：SPY 跌破 MA200 → 减半仓位；跌破 MA50 且放量 → 清仓观望
+6. **从不逆势加仓**（never average down）
+
+### 信号优先级
+
+```
+★★ Super Stock  →  最高优先级, 可做核心仓位
+★ Perfect Setup →  第二优先级, 但必须检查 Grade，D/F 慎入
+🏆 Leader       →  加入 Watchlist，等技术面触发
+👁 Watchlist    →  每天观察状态变化
+```
+
+### 建议的三阶段学习路径
+
+1. **第 1-2 周**：只看邮件，不下单，做交易日志（每天选 2-3 只 Perfect/Super，记录假设入场价/止损/预期目标）
+2. **第 3-6 周**：Paper Trading（TradingView/Webull/ThinkOrSwim 的模拟账户）
+3. **第 7 周+**：真金白银，但用小仓位（0.25% 单笔风险），每周复盘
+
+---
+
+## 方法论参考
+
+- Mark Minervini, *Trade Like a Stock Market Wizard* (2013)
+- Mark Minervini, *Think & Trade Like a Champion* (2017)
+- William O'Neil, *How to Make Money in Stocks* (CANSLIM 方法，SEPA 的思想源头之一)
+- Richard Wyckoff, *Wyckoff Method* (阶段分析的理论基础)
 
 ---
 
 ## 免责声明
 
-本工具仅供研究和学习使用，**不构成任何投资建议**。股市有风险，投资需谨慎。Minervini 本人也承认他的方法在熊市环境下表现会显著下降——熊市里最好的策略是空仓等待，而不是频繁交易。
-
-策略参考：Mark Minervini - *Trade Like a Stock Market Wizard*, *Think & Trade Like a Champion*
+**本工具不是投资建议。使用本工具进行的任何交易决策和结果由使用者自行承担。** 股票数据由 Yahoo Finance 提供。
