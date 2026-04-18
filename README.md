@@ -6,6 +6,7 @@
 > — *Mark Minervini, Trade Like a Stock Market Wizard*
 
 ---
+https://mikeli008008.github.io/minervini-screener/
 
 ## 核心功能
 
