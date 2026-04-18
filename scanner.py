@@ -1,7 +1,7 @@
 """
 Minervini Screener - 核心扫描引擎
 =====================================
-每日抓取股票数据,应用Minervini 8条趋势模板 + RS评分 + VCP检测
+每日抓取股票数据,应用Minervini 8条趋势模板 + RS评分 + VCP检测 + 基本面分析
 输出: reports/data_YYYY-MM-DD.json
 """
 import yfinance as yf
@@ -16,8 +16,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import warnings
 warnings.filterwarnings('ignore')
 
-# 引入VCP检测模块
+# 引入VCP和基本面模块
 from vcp import detect_vcp
+from fundamentals import analyze_fundamentals
 
 
 def load_tickers(path='tickers.txt'):
@@ -135,10 +136,89 @@ def calculate_stock_metrics(ticker, max_retries=3):
             industry = info.get('industry', 'N/A')
             company_name = info.get('longName', ticker) or ticker
         except:
+            info = {}
             market_cap = 0
             sector = 'N/A'
             industry = 'N/A'
             company_name = ticker
+        
+        # === 基本面分析 ===
+        # 复用已经抓到的stock对象,避免重复网络请求
+        fundamentals = None
+        try:
+            from fundamentals import (
+                extract_eps_series, extract_revenue_series,
+                calculate_eps_metrics, calculate_revenue_metrics,
+                calculate_margin_metrics, extract_info_metrics,
+                calculate_fundamental_score, grade_from_score,
+                check_leader_profile
+            )
+            
+            # 抓取季度财务数据
+            quarterly_fin = None
+            quarterly_inc = None
+            try:
+                quarterly_fin = stock.quarterly_financials
+            except:
+                pass
+            try:
+                quarterly_inc = stock.quarterly_income_stmt
+            except:
+                pass
+            
+            eps_series = extract_eps_series(quarterly_inc)
+            rev_series = extract_revenue_series(quarterly_fin)
+            eps_metrics = calculate_eps_metrics(eps_series)
+            rev_metrics = calculate_revenue_metrics(rev_series)
+            margin_metrics = calculate_margin_metrics(quarterly_fin)
+            info_metrics = extract_info_metrics(info)
+            
+            fund_score, fund_details = calculate_fundamental_score(
+                eps_metrics, rev_metrics, margin_metrics, info_metrics
+            )
+            fund_grade = grade_from_score(fund_score)
+            meets_profile, leader_checks = check_leader_profile(
+                eps_metrics, rev_metrics, margin_metrics, info_metrics
+            )
+            
+            fundamentals = {
+                'eps': {
+                    'yoy_growth': eps_metrics.get('latest_yoy_growth'),
+                    'prev_yoy_growth': eps_metrics.get('prev_yoy_growth'),
+                    'accelerating': eps_metrics.get('eps_accelerating'),
+                    'consistent_positive': eps_metrics.get('consistent_positive'),
+                },
+                'revenue': {
+                    'yoy_growth': rev_metrics.get('latest_yoy_growth'),
+                    'prev_yoy_growth': rev_metrics.get('prev_yoy_growth'),
+                    'accelerating': rev_metrics.get('revenue_accelerating'),
+                },
+                'margins': {
+                    'latest_net_margin': margin_metrics.get('latest_net_margin'),
+                    'yoy_net_margin': margin_metrics.get('yoy_net_margin'),
+                    'expanding': margin_metrics.get('margin_expanding'),
+                },
+                'ratios': {
+                    'roe': info_metrics.get('roe'),
+                    'profit_margin': info_metrics.get('profit_margin'),
+                    'operating_margin': info_metrics.get('operating_margin'),
+                    'held_by_institutions': info_metrics.get('held_by_institutions'),
+                    'forward_pe': info_metrics.get('forward_pe'),
+                },
+                'score': fund_score,
+                'grade': fund_grade,
+                'details': fund_details,
+                'meets_leader_profile': meets_profile,
+                'leader_checks': leader_checks,
+            }
+        except Exception as fe:
+            # 基本面抓取失败不影响技术面结果
+            fundamentals = {
+                'score': 0,
+                'grade': 'N/A',
+                'meets_leader_profile': False,
+                'error': str(fe)[:80]
+            }
         
         return {
             'ticker': ticker,
@@ -174,6 +254,8 @@ def calculate_stock_metrics(ticker, max_retries=3):
                 'near_pivot': vcp_result['price_near_pivot'],
                 'pivot_price': vcp_result['pivot_price']
             },
+            # === 基本面 ===
+            'fundamentals': fundamentals,
             'criteria': criteria,
             'price_history': [
                 {'d': d.strftime('%m-%d'), 'c': round(float(c), 2)}
@@ -257,29 +339,28 @@ def calculate_scores(results):
         r['criteria_passed'] = sum(1 for v in r['criteria'].values() if v)
         r['all_8_passed'] = r['criteria_passed'] == 8
         
-        # === 综合评分 (0-160) ===
-        # 基础分 (0-110):
-        #   - 每条模板条件满足 ×10 = 最高80分
-        #   - RS评分 ×0.3 = 最高30分
-        # 形态加分 (0-40):
-        #   - 真VCP识别 (vcp_score/100 × 25) = 最高25分 ★主要setup加分★
-        #   - ATR收缩 +3分
-        #   - 成交量萎缩 +3分
-        #   - 距52周高点 ≤15% +5分 (准备突破)
-        #   - 距VCP pivot ≤5% +4分 (即将触发)
-        # 完美奖励 (0-10):
-        #   - 8条全通过 +5
-        #   - 真VCP + 8条全通过 + 接近pivot +5 (完美setup)
+        # === 综合评分 (0-220) ===
+        # 技术面 (0-160):
+        #   - 8条趋势模板 ×10 = 80分
+        #   - RS评分 ×0.3 = 30分
+        #   - 真VCP × 25 = 25分
+        #   - ATR/Volume/近高/近pivot/全通过/perfect加分 = 最高25分
+        # 基本面 (0-50):
+        #   - 基本面评分 ×1.0 (直接加)
+        # Leader Profile 奖励 (0-10):
+        #   - 基本面达标 Leader Profile +10
+        #   - 与 Perfect Setup 叠加时形成 "真正的Minervini大牛股信号"
+        
+        # === 技术面基础分 ===
         score = r['criteria_passed'] * 10
         score += r['rs_rating'] * 0.3
         
         vcp = r.get('vcp', {})
-        vcp_score = vcp.get('score', 0)
+        vcp_score_val = vcp.get('score', 0)
         has_vcp = vcp.get('has_vcp', False)
         near_pivot = vcp.get('near_pivot', False)
         
-        # 真VCP评分作为最主要的setup加分
-        score += (vcp_score / 100) * 25
+        score += (vcp_score_val / 100) * 25
         
         if r['volatility_contraction']:
             score += 3
@@ -292,20 +373,37 @@ def calculate_scores(results):
         if r['all_8_passed']:
             score += 5
         if has_vcp and r['all_8_passed'] and near_pivot:
-            score += 5  # 完美setup
+            score += 5  # 技术面完美setup
+        
+        # === 基本面得分 ===
+        fund = r.get('fundamentals', {}) or {}
+        fund_score = fund.get('score', 0) or 0
+        meets_leader = fund.get('meets_leader_profile', False)
+        
+        score += fund_score  # 基本面评分直接加(0-50)
+        
+        if meets_leader:
+            score += 10  # Leader Profile奖励
+        
+        # === 真·大牛股信号: Perfect Setup + Leader Profile ===
+        # 这是 Minervini 最看重的信号组合
+        r['super_stock_candidate'] = bool(
+            has_vcp and r['all_8_passed'] and near_pivot and meets_leader
+        )
+        if r['super_stock_candidate']:
+            score += 5  # 额外奖励
         
         r['minervini_score'] = round(score, 1)
 
 
-def save_report(results, spy_return_1y, output_dir='reports'):
+def save_report(results, spy_return_1y, output_dir='reports', watchlist_status=None):
     """保存报告JSON"""
     Path(output_dir).mkdir(exist_ok=True)
     
     today = datetime.now().strftime('%Y-%m-%d')
     
     # 按评分排序
-    results.sort(key=lambda x: x['minervini_score'], reverse=True)
-    
+    results.sort(key=lambda x: x['minervini_score'], reverse=True)    
     output = {
         'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'date': today,
@@ -320,18 +418,35 @@ def save_report(results, spy_return_1y, output_dir='reports'):
                                     r.get('vcp', {}).get('has_vcp') 
                                     and r['all_8_passed']
                                     and r.get('vcp', {}).get('near_pivot')),
+        # === 基本面统计 ===
+        'leader_profile_count': sum(1 for r in results 
+                                    if (r.get('fundamentals') or {}).get('meets_leader_profile')),
+        'grade_a_count': sum(1 for r in results 
+                            if (r.get('fundamentals') or {}).get('grade') == 'A'),
+        'grade_b_count': sum(1 for r in results 
+                            if (r.get('fundamentals') or {}).get('grade') == 'B'),
+        'super_stock_count': sum(1 for r in results if r.get('super_stock_candidate')),
+        'watchlist_status': watchlist_status or [],
+        'watchlist_count': len(watchlist_status) if watchlist_status else 0,
         'stocks': results
     }
     
-    # 最新数据
+    # 最新数据 - 使用default处理numpy类型
+    def json_safe(obj):
+        if hasattr(obj, 'item'):  # numpy标量
+            return obj.item()
+        if isinstance(obj, (pd.Timestamp,)):
+            return str(obj)
+        return str(obj)
+    
     latest_path = f'{output_dir}/latest.json'
     with open(latest_path, 'w') as f:
-        json.dump(output, f, separators=(',', ':'))
+        json.dump(output, f, separators=(',', ':'), default=json_safe)
     
     # 归档每日快照
     daily_path = f'{output_dir}/data_{today}.json'
     with open(daily_path, 'w') as f:
-        json.dump(output, f, separators=(',', ':'))
+        json.dump(output, f, separators=(',', ':'), default=json_safe)
     
     return output
 
@@ -362,31 +477,72 @@ def main():
     print("Computing Minervini scores...")
     calculate_scores(results)
     
-    # 保存报告
-    output = save_report(results, spy_return_1y)
+    # === 更新 Watchlist (自动沉淀 Super Stock 和 Perfect Setup) ===
+    try:
+        from watchlist import update_watchlist_from_scan, get_watchlist_status
+        added, updated = update_watchlist_from_scan(results)
+        if added or updated:
+            print(f"\n✓ Watchlist updated: +{added} new, {updated} upgraded")
+        else:
+            print(f"\n✓ Watchlist unchanged")
+        
+        # 获取完整状态但在存JSON时只保留轻量字段(scan_data太大会膨胀JSON)
+        watchlist_full = get_watchlist_status(results)
+        watchlist_status = []
+        for w in watchlist_full:
+            light = {k: v for k, v in w.items() if k != 'scan_data'}
+            # 保留scan_data的关键字段
+            if w.get('scan_data'):
+                sd = w['scan_data']
+                light['price'] = sd.get('price')
+                light['name'] = sd.get('name')
+                light['sector'] = sd.get('sector')
+                light['pct_from_high'] = sd.get('pct_from_high')
+                light['return_1y'] = sd.get('return_1y')
+                light['rs_rating'] = sd.get('rs_rating')
+                light['criteria_passed'] = sd.get('criteria_passed')
+                light['fund_grade'] = (sd.get('fundamentals') or {}).get('grade')
+                light['pivot_price'] = (sd.get('vcp') or {}).get('pivot_price')
+                light['has_vcp'] = (sd.get('vcp') or {}).get('has_vcp')
+                light['near_pivot'] = (sd.get('vcp') or {}).get('near_pivot')
+                light['meets_leader'] = (sd.get('fundamentals') or {}).get('meets_leader_profile')
+            watchlist_status.append(light)
+    except Exception as we:
+        print(f"\n⚠ Watchlist update failed: {we}", file=sys.stderr)
+        watchlist_status = []
+    
+    # 保存报告 (包含watchlist状态)
+    output = save_report(results, spy_return_1y, watchlist_status=watchlist_status)
     
     # 打印Top 15
-    print("\n" + "="*95)
+    print("\n" + "="*115)
     print(f"TOP 15 (Date: {output['date']}, Total: {output['total_stocks']}, "
-          f"8/8 Pass: {output['all_8_passed_count']}, True VCP: {output['true_vcp_count']})")
-    print("="*95)
-    print(f"{'#':<4}{'Ticker':<8}{'Company':<28}{'Score':>7}{'Pass':>6}{'RS':>5}"
-          f"{'1Y%':>8}{'VCP':>5}{'Pivot':>10}{'Setup':>12}")
-    print("-"*95)
+          f"8/8 Pass: {output['all_8_passed_count']}, True VCP: {output['true_vcp_count']}, "
+          f"Leader: {output['leader_profile_count']}, ★Super: {output['super_stock_count']})")
+    print("="*115)
+    print(f"{'#':<4}{'Ticker':<8}{'Company':<26}{'Score':>7}{'Pass':>5}{'RS':>4}"
+          f"{'1Y%':>7}{'Fund':>6}{'Gr':>4}{'EPS%':>8}{'Rev%':>7}{'Setup':>18}")
+    print("-"*115)
     for i, r in enumerate(sorted(results, key=lambda x: x['minervini_score'], reverse=True)[:15]):
         setup = []
         vcp = r.get('vcp', {})
-        if vcp.get('has_vcp'): setup.append('✓VCP')
-        elif r['volatility_contraction']: setup.append('atr')
-        if r['volume_drying']: setup.append('vol')
+        fund = r.get('fundamentals') or {}
+        if r.get('super_stock_candidate'): setup.append('★SUPER')
+        elif vcp.get('has_vcp'): setup.append('✓VCP')
         if vcp.get('near_pivot'): setup.append('near')
+        if fund.get('meets_leader_profile'): setup.append('LDR')
         setup_str = ','.join(setup) if setup else '-'
-        name = r['name'][:26]
-        vcp_score_str = f"{int(vcp.get('score', 0))}"
-        pivot_str = f"${vcp.get('pivot_price', 0):.0f}" if vcp.get('pivot_price') else '-'
-        print(f"{i+1:<4}{r['ticker']:<8}{name:<28}{r['minervini_score']:>7.1f}"
-              f"{r['criteria_passed']:>6}{int(r['rs_rating']):>5}"
-              f"{r['return_1y']:>7.1f}%{vcp_score_str:>5}{pivot_str:>10}{setup_str:>12}")
+        name = r['name'][:24]
+        fund_score = int(fund.get('score', 0) or 0)
+        grade = fund.get('grade', '-')
+        eps_g = fund.get('eps', {}).get('yoy_growth') if fund.get('eps') else None
+        rev_g = fund.get('revenue', {}).get('yoy_growth') if fund.get('revenue') else None
+        eps_str = f"{eps_g:.0f}%" if eps_g is not None else "-"
+        rev_str = f"{rev_g:.0f}%" if rev_g is not None else "-"
+        print(f"{i+1:<4}{r['ticker']:<8}{name:<26}{r['minervini_score']:>7.1f}"
+              f"{r['criteria_passed']:>5}{int(r['rs_rating']):>4}"
+              f"{r['return_1y']:>6.0f}%{fund_score:>6}{grade:>4}"
+              f"{eps_str:>8}{rev_str:>7}{setup_str:>18}")
     
     print(f"\n✓ Report saved to reports/latest.json and reports/data_{output['date']}.json")
     return output

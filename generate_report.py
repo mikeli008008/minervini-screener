@@ -137,25 +137,42 @@ tbody td.num { text-align:right; font-variant-numeric:tabular-nums; }
   </div>
 </header>
 <div class="tape"><div class="tape-inner" id="tape"></div></div>
-<div class="stats" style="grid-template-columns:repeat(6,1fr);">
+<div class="stats" style="grid-template-columns:repeat(8,1fr);">
   <div class="stat accent"><div class="label">Universe</div><div class="value" id="sTotal">—</div><div class="trend">scanned</div></div>
-  <div class="stat"><div class="label">All 8 Passed</div><div class="value"><span id="s8num">—</span></div><div class="trend">qualifiers</div></div>
+  <div class="stat" style="background:linear-gradient(135deg, rgba(0,255,157,0.08), var(--bg-panel));">
+    <div class="label" style="color:#00ff9d;">★★ Super</div>
+    <div class="value" id="sSuper" style="color:#00ff9d;">—</div>
+    <div class="trend" style="color:#00ff9d;">tech+fund</div>
+  </div>
   <div class="stat" style="background:linear-gradient(135deg, rgba(212,255,0,0.06), var(--bg-panel));">
     <div class="label" style="color:var(--accent);">★ Perfect</div>
     <div class="value" id="sPerfect" style="color:var(--accent);">—</div>
-    <div class="trend" style="color:var(--accent);">top priority</div>
+    <div class="trend" style="color:var(--accent);">tech perfect</div>
   </div>
-  <div class="stat"><div class="label">True VCP</div><div class="value" id="sTrueVCP">—</div><div class="trend">pattern match</div></div>
-  <div class="stat"><div class="label">Near Pivot</div><div class="value" id="sNearPivot">—</div><div class="trend">breakout zone</div></div>
-  <div class="stat"><div class="label">Top RS</div><div class="value" id="sRS">—</div><div class="trend">percentile 99</div></div>
+  <div class="stat">
+    <div class="label" style="color:var(--green);">🏆 Leader</div>
+    <div class="value" id="sLeader" style="color:var(--green);">—</div>
+    <div class="trend">fund strong</div>
+  </div>
+  <div class="stat" style="background:linear-gradient(135deg, rgba(168,127,240,0.06), var(--bg-panel));">
+    <div class="label" style="color:#a87ff0;">👁 Watchlist</div>
+    <div class="value" id="sWatchlist" style="color:#a87ff0;">—</div>
+    <div class="trend">tracked</div>
+  </div>
+  <div class="stat"><div class="label">All 8 Passed</div><div class="value"><span id="s8num">—</span></div><div class="trend">qualifiers</div></div>
+  <div class="stat"><div class="label">True VCP</div><div class="value" id="sTrueVCP">—</div><div class="trend">pattern</div></div>
+  <div class="stat"><div class="label">Top RS</div><div class="value" id="sRS">—</div><div class="trend">perc 99</div></div>
 </div>
 <div class="filters">
   <div class="fgroup"><label>Filter</label>
     <div class="toggle active" data-filter="all">All</div>
+    <div class="toggle" data-filter="super" style="color:#00ff9d;border-color:#00ff9d;">★★ Super</div>
     <div class="toggle" data-filter="perfect" style="color:var(--accent);border-color:var(--accent-dim);">★ Perfect</div>
+    <div class="toggle" data-filter="leader" style="color:var(--green);border-color:var(--green);">🏆 Leader</div>
+    <div class="toggle" data-filter="watchlist" style="color:#a87ff0;border-color:#a87ff0;">👁 Watchlist</div>
     <div class="toggle" data-filter="truevcp">True VCP</div>
-    <div class="toggle" data-filter="pass8">8/8 Pass</div>
-    <div class="toggle" data-filter="pass7">7+/8</div>
+    <div class="toggle" data-filter="pass8">8/8</div>
+    <div class="toggle" data-filter="gradeab">Grade A+B</div>
     <div class="toggle" data-filter="nearpivot">Near Pivot</div>
     <div class="toggle" data-filter="rs90">RS ≥ 90</div>
   </div>
@@ -168,7 +185,9 @@ tbody td.num { text-align:right; font-variant-numeric:tabular-nums; }
     <thead><tr>
       <th data-sort="ticker">Ticker</th><th data-sort="name">Company</th><th data-sort="sector">Sector</th>
       <th data-sort="minervini_score" class="num sorted">Score</th><th data-sort="criteria_passed" class="num">Pass</th>
-      <th data-sort="rs_rating" class="num">RS</th><th data-sort="price" class="num">Price</th>
+      <th data-sort="rs_rating" class="num">RS</th>
+      <th class="num" style="text-align:center;">Grade</th>
+      <th data-sort="price" class="num">Price</th>
       <th data-sort="return_1y" class="num">1Y %</th><th data-sort="pct_from_high" class="num">From High</th>
       <th>Setup</th>
     </tr></thead>
@@ -206,7 +225,9 @@ function initStats(){
   document.getElementById('spyRet').textContent = fmtPct(DATA.spy_return_1y);
   document.getElementById('sPerfect').textContent = DATA.perfect_setup_count || 0;
   document.getElementById('sTrueVCP').textContent = DATA.true_vcp_count || 0;
-  document.getElementById('sNearPivot').textContent = DATA.near_pivot_count || 0;
+  document.getElementById('sSuper').textContent = DATA.super_stock_count || 0;
+  document.getElementById('sLeader').textContent = DATA.leader_profile_count || 0;
+  document.getElementById('sWatchlist').textContent = DATA.watchlist_count || 0;
   const maxRS = Math.max(...DATA.stocks.map(s=>s.rs_rating));
   document.getElementById('sRS').textContent = Math.round(maxRS);
   const sectors = [...new Set(DATA.stocks.map(s=>s.sector))].sort();
@@ -219,7 +240,15 @@ function initStats(){
 }
 function getFiltered(){
   let list = DATA.stocks.slice();
-  if(state.filter==='perfect') list = list.filter(s => (s.vcp||{}).has_vcp && s.all_8_passed && (s.vcp||{}).near_pivot);
+  // Watchlist过滤特殊: 从DATA.stocks里挑出watchlist_status里提到的ticker
+  if(state.filter==='watchlist') {
+    const watchTickers = new Set((DATA.watchlist_status || []).map(w => w.ticker));
+    list = list.filter(s => watchTickers.has(s.ticker));
+  }
+  else if(state.filter==='super') list = list.filter(s => s.super_stock_candidate);
+  else if(state.filter==='perfect') list = list.filter(s => (s.vcp||{}).has_vcp && s.all_8_passed && (s.vcp||{}).near_pivot);
+  else if(state.filter==='leader') list = list.filter(s => ((s.fundamentals||{}).meets_leader_profile));
+  else if(state.filter==='gradeab') list = list.filter(s => ['A','B'].includes((s.fundamentals||{}).grade));
   else if(state.filter==='truevcp') list = list.filter(s => (s.vcp||{}).has_vcp);
   else if(state.filter==='pass8') list = list.filter(s=>s.criteria_passed===8);
   else if(state.filter==='pass7') list = list.filter(s=>s.criteria_passed>=7);
@@ -234,38 +263,58 @@ function renderTable(){
   const list = getFiltered();
   const tbody = document.getElementById('tbody');
   document.getElementById('showCount').textContent = list.length;
+  
+  // 建立watchlist ticker查找表
+  const watchlistTickers = new Set((DATA.watchlist_status || []).map(w => w.ticker));
+  
   tbody.innerHTML = list.map(s=>{
     const c = s.criteria;
     const dots = Object.values(c).map(v=>`<span class="dot${v?' on':''}"></span>`).join('');
     const rsClass = s.rs_rating>=90?'high':s.rs_rating>=70?'mid':'low';
     const retClass = s.return_1y>=0?'pos':'neg';
     const v = s.vcp || {};
+    const f = s.fundamentals || {};
+    const isSuper = s.super_stock_candidate;
     const isPerfect = v.has_vcp && s.all_8_passed && v.near_pivot;
+    const isLeader = f.meets_leader_profile;
+    const isWatch = watchlistTickers.has(s.ticker);
+    const grade = f.grade || '—';
+    const gradeColor = grade==='A'?'#00ff9d':grade==='B'?'#d4ff00':grade==='C'?'#ffaa00':grade==='D'?'#ff8866':grade==='F'?'#ff4444':'#555';
+    
     const tags = [];
-    if (isPerfect) {
+    if (isSuper) {
+      tags.push('<span class="tag" style="background:linear-gradient(135deg,rgba(0,255,157,0.3),rgba(0,255,157,0.1));color:#00ff9d;font-weight:800;letter-spacing:0.08em;border:1px solid rgba(0,255,157,0.5);">★★SUPER</span>');
+    } else if (isPerfect) {
       tags.push('<span class="tag" style="background:linear-gradient(135deg,rgba(212,255,0,0.25),rgba(212,255,0,0.1));color:var(--accent);font-weight:700;letter-spacing:0.08em;border:1px solid rgba(212,255,0,0.4);">★PERFECT</span>');
     } else if (v.has_vcp) {
       tags.push('<span class="tag vcp" style="font-weight:600;">✓VCP</span>');
     } else if (s.volatility_contraction) {
       tags.push('<span class="tag" style="color:#9ab800;background:rgba(212,255,0,0.06);">atr</span>');
     }
-    if (v.near_pivot && !isPerfect) {
+    if (v.near_pivot && !isPerfect && !isSuper) {
       tags.push('<span class="tag" style="background:rgba(255,170,0,0.18);color:var(--amber);">PIVOT</span>');
     }
+    if (isLeader && !isSuper) {
+      tags.push('<span class="tag" style="background:rgba(0,214,143,0.18);color:var(--green);font-weight:600;">LDR</span>');
+    }
+    if (isWatch) {
+      tags.push('<span class="tag" style="background:rgba(168,127,240,0.2);color:#a87ff0;font-weight:600;">👁</span>');
+    }
     if (s.volume_drying) tags.push('<span class="tag vol">VOL↓</span>');
-    const scoreBarWidth = Math.min(100,(s.minervini_score/135)*100);
+    const scoreBarWidth = Math.min(100,(s.minervini_score/180)*100);
     return `<tr data-ticker="${s.ticker}" onclick="toggleDetail('${s.ticker}')">
       <td class="ticker">${s.ticker}</td><td class="name">${s.name}</td>
       <td style="color:var(--text-dim);font-size:11px;">${s.sector.substring(0,12)}</td>
       <td class="num"><span class="score-cell">${fmt(s.minervini_score,1)}<span class="score-bar"><span style="display:block;height:100%;background:var(--accent);width:${scoreBarWidth}%"></span></span></span></td>
       <td class="num"><span class="criteria-dots">${dots}</span> <span style="margin-left:6px;color:var(--text-dim);">${s.criteria_passed}/8</span></td>
       <td class="num"><span class="rs-badge ${rsClass}">${Math.round(s.rs_rating)}</span></td>
+      <td class="num" style="text-align:center;"><span style="color:${gradeColor};font-family:'Fraunces',serif;font-weight:700;font-size:13px;">${grade}</span></td>
       <td class="num">$${fmt(s.price)}</td>
       <td class="num pct ${retClass}">${fmtPct(s.return_1y)}</td>
       <td class="num" style="color:var(--text-dim);">${fmtPct(s.pct_from_high)}</td>
       <td>${tags.join(' ')}</td>
     </tr>
-    <tr class="detail-row" id="detail-${s.ticker}"><td colspan="10"></td></tr>`;
+    <tr class="detail-row" id="detail-${s.ticker}"><td colspan="11"></td></tr>`;
   }).join('');
   document.querySelectorAll('thead th').forEach(th=>{ th.classList.remove('sorted','asc'); if(th.dataset.sort===state.sortKey){ th.classList.add('sorted'); if(state.sortAsc) th.classList.add('asc'); } });
   if(state.expandedTicker){ const row = document.querySelector(`tr[data-ticker="${state.expandedTicker}"]`); if(row) expandDetail(state.expandedTicker,true); }
@@ -356,7 +405,110 @@ function expandDetail(ticker){
       </div>`;
   }
   
-  detailRow.querySelector('td').innerHTML = `<div class="detail-inner" style="grid-template-columns:1fr 1fr 1fr;">
+  // === 基本面详情区 ===
+  const fund = s.fundamentals || {};
+  const hasGoodFund = fund.score && fund.score > 0;
+  const grade = fund.grade || '—';
+  const gradeColor = grade==='A'?'#00ff9d':grade==='B'?'#d4ff00':grade==='C'?'#ffaa00':grade==='D'?'#ff8866':grade==='F'?'#ff4444':'var(--text-faint)';
+  
+  let fundContent;
+  if (!hasGoodFund) {
+    fundContent = `<div style="color:var(--text-dim);font-size:12px;padding:16px 0;text-align:center;">
+      Fundamentals data not available.
+    </div>`;
+  } else {
+    const eps = fund.eps || {};
+    const rev = fund.revenue || {};
+    const margins = fund.margins || {};
+    const ratios = fund.ratios || {};
+    const leaderChecks = fund.leader_checks || {};
+    const isLeader = fund.meets_leader_profile;
+    
+    const epsG = eps.yoy_growth;
+    const epsGStr = epsG !== null && epsG !== undefined ? 
+      (epsG >= 500 ? '+500%+' : `${epsG >= 0 ? '+' : ''}${epsG.toFixed(1)}%`) : '—';
+    const epsGColor = epsG > 25 ? 'var(--green)' : epsG > 0 ? 'var(--text)' : 'var(--red)';
+    
+    const revG = rev.yoy_growth;
+    const revGStr = revG !== null && revG !== undefined ? `${revG >= 0 ? '+' : ''}${revG.toFixed(1)}%` : '—';
+    const revGColor = revG > 15 ? 'var(--green)' : revG > 0 ? 'var(--text)' : 'var(--red)';
+    
+    const roe = ratios.roe;
+    const roeStr = roe !== null && roe !== undefined ? `${roe.toFixed(1)}%` : '—';
+    const roeColor = roe >= 17 ? 'var(--green)' : roe >= 10 ? 'var(--text)' : 'var(--text-dim)';
+    
+    const pm = ratios.profit_margin;
+    const pmStr = pm !== null && pm !== undefined ? `${pm.toFixed(1)}%` : '—';
+    
+    const inst = ratios.held_by_institutions;
+    const instStr = inst !== null && inst !== undefined ? `${inst.toFixed(0)}%` : '—';
+    
+    const marginExp = margins.expanding;
+    const epsAccel = eps.accelerating;
+    const revAccel = rev.accelerating;
+    
+    const statusBanner = isLeader ? 
+      `<div style="background:linear-gradient(135deg, rgba(0,214,143,0.15), rgba(0,214,143,0.02));border:1px solid rgba(0,214,143,0.3);border-left:3px solid var(--green);padding:10px 14px;margin-bottom:14px;">
+        <div style="color:var(--green);font-weight:600;font-size:13px;letter-spacing:0.05em;">🏆 LEADER PROFILE</div>
+        <div style="color:var(--text-dim);font-size:10px;margin-top:3px;">Grade ${grade} · Score ${fund.score}/50</div>
+      </div>` :
+      `<div style="background:var(--bg);border:1px solid var(--border);padding:10px 14px;margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div style="color:${gradeColor};font-weight:700;font-size:18px;font-family:'Fraunces',serif;">Grade: ${grade}</div>
+          <div style="color:var(--text-dim);font-size:11px;">${fund.score}/50</div>
+        </div>
+      </div>`;
+    
+    const checkItem = (label, passed) => 
+      `<li style="display:flex;align-items:center;gap:10px;padding:5px 0;font-size:11px;">
+        <span class="check ${passed?'pass':'fail'}" style="width:16px;height:16px;font-size:10px;">${passed?'✓':'✗'}</span>
+        <span style="flex:1;color:var(--text);">${label}</span>
+      </li>`;
+    
+    fundContent = `
+      ${statusBanner}
+      <div class="metrics-grid" style="margin-bottom:16px;">
+        <div class="mcell">
+          <div class="ml">EPS YoY</div>
+          <div class="mv" style="color:${epsGColor};font-weight:600;">${epsGStr}</div>
+          ${epsAccel ? '<div style="color:var(--accent);font-size:9px;margin-top:2px;">↗ accelerating</div>' : ''}
+        </div>
+        <div class="mcell">
+          <div class="ml">Rev YoY</div>
+          <div class="mv" style="color:${revGColor};font-weight:600;">${revGStr}</div>
+          ${revAccel ? '<div style="color:var(--accent);font-size:9px;margin-top:2px;">↗ accelerating</div>' : ''}
+        </div>
+        <div class="mcell">
+          <div class="ml">ROE</div>
+          <div class="mv" style="color:${roeColor};">${roeStr}</div>
+        </div>
+        <div class="mcell">
+          <div class="ml">Profit Margin</div>
+          <div class="mv">${pmStr}</div>
+          ${marginExp ? '<div style="color:var(--green);font-size:9px;margin-top:2px;">↗ expanding</div>' : ''}
+        </div>
+        <div class="mcell">
+          <div class="ml">Institutions</div>
+          <div class="mv">${instStr}</div>
+        </div>
+        <div class="mcell">
+          <div class="ml">Fund Score</div>
+          <div class="mv" style="color:var(--accent);">${fund.score}/50</div>
+        </div>
+      </div>
+      <div style="font-size:10px;color:var(--text-dim);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:6px;">
+        Leader Profile Check (${Object.values(leaderChecks).filter(v=>v).length}/5)
+      </div>
+      <ul style="list-style:none;padding:0;margin:0;">
+        ${checkItem('EPS growth ≥ 25% YoY', leaderChecks.eps_growth_25plus)}
+        ${checkItem('EPS accelerating', leaderChecks.eps_accelerating)}
+        ${checkItem('Revenue growth positive', leaderChecks.revenue_growth_positive)}
+        ${checkItem('ROE ≥ 17%', leaderChecks.roe_17plus)}
+        ${checkItem('Margins expanding or high', leaderChecks.margin_expanding_or_high)}
+      </ul>`;
+  }
+  
+  detailRow.querySelector('td').innerHTML = `<div class="detail-inner" style="grid-template-columns:repeat(4, 1fr);">
     <div class="detail-section">
       <h3>Trend Template · 趋势模板</h3>
       <ul class="criteria-list">${criteriaItems}</ul>
@@ -376,7 +528,12 @@ function expandDetail(ticker){
     </div>
     
     <div class="detail-section">
-      <h3>Price Action · 价格走势 (6M)</h3>
+      <h3>Fundamentals · 基本面</h3>
+      ${fundContent}
+    </div>
+    
+    <div class="detail-section">
+      <h3>Price Action · 走势 (6M)</h3>
       <div class="chart-box">
         <div class="chart-label">${s.ticker} · ${s.industry||''}</div>
         <div class="chart-price">$${fmt(s.price)}</div>
@@ -387,8 +544,8 @@ function expandDetail(ticker){
         <div class="mcell"><div class="ml">ATR 40D</div><div class="mv">${fmt(s.atr_40)}</div></div>
         <div class="mcell"><div class="ml">Pullback</div><div class="mv">${fmtPct(s.pullback_from_recent_high)}</div></div>
         <div class="mcell"><div class="ml">RS Rating</div><div class="mv" style="color:var(--accent)">${Math.round(s.rs_rating)}</div></div>
-        <div class="mcell"><div class="ml">RS vs SPY</div><div class="mv" style="color:var(--accent)">+${fmt(s.rs_raw,0)}%</div></div>
         <div class="mcell"><div class="ml">1Y Return</div><div class="mv" style="color:${s.return_1y>=0?'var(--green)':'var(--red)'}">${fmtPct(s.return_1y)}</div></div>
+        <div class="mcell"><div class="ml">RS vs SPY</div><div class="mv" style="color:var(--accent)">+${fmt(s.rs_raw,0)}%</div></div>
       </div>
     </div>
   </div>`;
