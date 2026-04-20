@@ -47,7 +47,18 @@ jobs:
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
           REPORT_URL: ${{ secrets.REPORT_URL }}
         run: python send_email.py
-      
+        
+      - name: Publish latest.json for trading-brain
+        run: cp reports/latest.json docs/latest.json
+
+      - name: Commit latest.json
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add docs/latest.json
+          git diff --quiet && git diff --staged --quiet || git commit -m "update latest.json"
+          git push
+          
       - name: Commit updated reports
         run: |
           git config --local user.email "action@github.com"
